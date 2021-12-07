@@ -1,0 +1,28 @@
+{
+    "A2": {
+        "contig_1": 110,
+        "contig_2": 279,
+        "contig_3": 0,
+        "contig_4": 279,
+        "contig_5": 558,
+        "contig_6": 168,
+        "contig_7": 179,
+        "contig_8": 504,
+        "contig_9": 290,
+        "contig_10": 53,
+        "contig_11": 246,
+        "contig_12": 290
+    },
+    "B1": {
+        "contig_1": 126,
+        "contig_2": 138,
+        "contig_3": 44
+    },
+    "B2": {
+        "contig_1": 239,
+        "contig_2": 120,
+        "contig_3": 460,
+        "contig_4": 111,
+        "contig_5": 215
+    }
+}
