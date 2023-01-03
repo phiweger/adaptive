@@ -7,10 +7,41 @@ Below we provide code for non-standard analyses. This repo also contains all dat
 - Analysis of experiment that switched adaptive sequencing on and off
 - Bayesian regression model of target count
 
-First, download the `sequencing` data we [doposited](https://osf.io/wt7gc/) with the Open Science Framework (OSF) under project ID `wt7gc`, and unpack it.
+
+### Setup
+
+Dependencies:
 
 
-### Samples
+```bash
+conda create -n adaptive -y -c bioconda mummer mmseqs2 prodigal samtools minimap2
+conda activate adaptive
+pip install screed tqdm numpy pandas matplotlib 
+
+# This could be installed in a separate environment to speed up installations:
+conda install -c r r-tidyverse
+```
+
+
+### Data
+
+> All basecalled nanopore sequencing data has been deposited with the SRA, NCBI. Metagenomic reads are available under project ID `PRJNA788147`. Reads from isolate genomes, the Flongle flow cell and the experiment alternating between adaptive and standard state have been deposited under project ID `PRJNA788148` under their respective sample ID (_Raoultella ornithinolytica_: `SAMN23928631`, _Citrobacter freundii_: `SAMN23928632`, _Citrobacter amalonaticus_: `SAMN23928633`).
+
+To make download the sequencing data more convenient, we mirrored the SRA data on OSF for batch download:
+
+
+```bash
+# Clone code and required data from repo
+git clone https://github.com/phiweger/adaptive
+cd adaptive
+
+# Download raw sequencing data from OSF project https://osf.io/8p9t4/
+pip install osfclient
+osf -p 8p9t4 clone
+mv 8p9t4/osfstorage/sequencing .
+# This should create a folder "sequencing" that contains the raw seq data.
+```
+
 
 - `A2` .. _Raoultella ornithinolytica_
 - `B1` .. _Citrobacter freundii_ (same as `A1`, not used here)
@@ -21,37 +52,37 @@ First, download the `sequencing` data we [doposited](https://osf.io/wt7gc/) with
 
 Pairwise align isolate genomes and MAGs and parse all genes longer than 1 kb and 99% sequence identity.
 
-```bash
-mkdir tmp
-```
-
 
 ```python
 from glob import glob
 from itertools import combinations, islice
 import subprocess
 import os
+from pathlib import Path
 
 import screed
 from tqdm import tqdm
 
 
-g1 = glob('assemblies/*.fasta')
-d1 = {os.path.basename(i).split('_')[0]: i for i in g1}
+assemblies = [Path(f'assemblies/{i}.fna') for i in ['A2', 'B1', 'B2']]
+d = {i.name.replace('.fna', ''): str(i.resolve()) for i in assemblies}
 
-g2 = glob('metagenome/MAGs_uncultured/*.fa')
-d2 = {os.path.basename(i).replace('.fa', ''): i for i in g2}
-d2 = {k.replace('.', '_'): v for k, v in d2.items()} 
-
-d = d1 | d2 
+bins = Path('metagenome/MAGs_uncultured/')
+d2 = {i.name.replace('.fa', ''): str(i.resolve()) for i in bins.glob('*.fa')}
+d2 = {k.replace('.', '_'): v for k, v in d2.items()}
+d.update(d2)
 
 
 # Pairwise genome alignment
+p = Path('tmp/')
+p.mkdir(parents=True, exist_ok=True)
+
 for i, j in tqdm(combinations(d, 2)):
     name = f'{i}__{j}'  # dunder
     print(name)
     subprocess.run(['nucmer', '-p', f'tmp/{name}', d[i], d[j]])
 ```
+
 
 Now retrieve all shared elements with a minimum:
 
@@ -182,7 +213,9 @@ for i in A2 B1 B2; do
 done
 ```
 
+
 How similar are the coding sequences we annotated as resistance genes to their respective matches in the reduced AMR database we used during adaptive sequencing?
+
 
 ```bash
 DB=database/cluster_rep_seq.fasta
@@ -193,11 +226,15 @@ for i in A2 B1 B2; do
     mmseqs easy-search --search-type 3 --threads 8 --max-accept 1 --min-seq-id 0.5 --cov-mode 1 -c 0.5 $QRY $DB assemblies/${i}.amr.card_sim.m8 assemblies/tmp
 done
 # Sanity check:
-# 44 grep '>' B2.amr.fna | wc -l
-# 44 wc -l B2.amr.card_sim.m8
+# grep '>' assemblies/B2.amr.fna | wc -l
+# 44
+# wc -l assemblies/B2.amr.card_sim.m8
+# 44
 ```
 
+
 Integrate data.
+
 
 ```python
 from collections import defaultdict
@@ -220,9 +257,11 @@ def parse_fp(fp):
     x = fp.name.strip('h.fastq.gz.sam')
     if 'unrejected' in x:
         group = 'adaptive'
+        # unrejected_A2_2_16h.fastq.gz
         _, isolate, replicate, hours = x.split('_')
     else:
         group = 'standard'
+        # A2_1_7h.fastq.gz
         isolate, replicate, hours = x.split('_')
     return group, isolate, int(replicate), int(hours)
 
@@ -243,7 +282,7 @@ chromosome = {
 }
 
 # What is their copy number?
-with open('cn.json', 'r') as file:
+with open('misc/cn.json', 'r') as file:
     cn = json.load(file)
 
 
@@ -260,6 +299,7 @@ for sample in ['A2', 'B1', 'B2']:
 
     p = Path(f'aln/{sample}')
     for fp in tqdm(p.rglob('*.sam')):
+        #print(fp)
 
         # How many reads map to AMR genes?
         with open(fp, 'r') as file:
@@ -269,7 +309,7 @@ for sample in ['A2', 'B1', 'B2']:
                 read_len = len(l[9])
 
                 if (contig != '*') and (contig in amr):
-                    
+
                     group, isolate, replicate, hours = parse_fp(fp)
                     # Read len distr chromosome vs plasmid
                     if '_'.join(contig.split('_')[:2]) == chromosome[sample]:
@@ -321,7 +361,9 @@ with open('misc/similarity.csv', 'w+') as out:
                 out.write(f'{sample},{condition},{k},{v},{s},{carrier},{mu},{cov}\n')
 ```
 
+
 Visualize.
+
 
 ```r
 library(ggplot2)
@@ -346,6 +388,7 @@ p <- ggplot(df, aes(x=carrier, y=log_mu, color=condition)) + geom_jitter(size=.7
 
 ### Bayesian regression model of target count
 
+
 ```bash
 # Pull container with all dependencies, enter it and start R session
 docker pull lcolling/brms
@@ -353,7 +396,9 @@ docker run --rm -it -v $PWD:/data lcolling/brms /bin/bash
 R
 ```
 
+
 Fun.
+
 
 ```r
 library(brms)
@@ -393,7 +438,9 @@ p <- ggplot(new, aes(x=log_mu, y=count, color=condition)) + geom_point(size=.8) 
 # Figure 2E
 ```
 
+
 Model summary:
+
 
 ```
  Family: poisson
